@@ -1,0 +1,103 @@
+{
+   "$schema": "https://aka.ms/PowerShell/Crescendo/Schemas/2021-11",
+   "Commands": [
+        {
+            "Verb": "Get",
+            "Noun": "TerraformVersion",
+            "Aliases": ["Get-TFVersion","tfVersion"],
+            "Description": "Calls terraform version and converts the result into an object",
+            "Usage": {
+                "Synopsis": "Gets the Terraform Version",
+                "HasOptions": false,
+                "SupportsFlags": false
+            },
+            "OriginalName": "terraform",
+            "OriginalCommandElements": [
+                "version",
+                "-json"
+            ],
+            "OutputHandlers": [
+                {
+                "ParameterSetName": "Default",
+                "HandlerType": "Function",
+                "Handler": "tfVersionJsonToObject",
+                "StreamOutput": true
+                }
+            ]
+        },
+        {
+            "Verb": "New",
+            "Noun": "TerraformPlan",
+            "Aliases": ["New-TFPlan","tfPlan"],
+            "Usage": { "Synopsis": "Builds a new terraform plan from the current configuration"},
+            "Description": "Calls terraform plan, optionally with -Destroy and -Out <file> options, returns planned steps as objects.",
+            "OriginalName": "terraform",
+            "OriginalCommandElements": [
+                "plan",
+                "-json"
+            ],
+            "Parameters": [
+                {"Name": "Directory",
+                "OriginalName": "-chdir=",
+                "NoGap": true,
+                "ApplyToExecutable": true
+                },
+                {"Name": "OutFile",
+                "OriginalName": "-out",
+                "OriginalPosition": 0,
+                "Position": 0,
+                "ParameterType": "String"
+                },
+                {"Name": "Destroy",
+                 "OriginalName": "-destroy",
+                 "ParameterType": "Switch",
+                 "OriginalPosition": 1
+                }
+            ],
+            "OutputHandlers": [
+                {
+                "ParameterSetName": "Default",
+                "HandlerType": "Function",
+                "Handler": "tfPlanJsonToObject",
+                "StreamOutput": true
+                }
+            ]
+        },
+        {
+            "Verb": "New",
+            "Noun": "TerraformGraph",
+            "Aliases": ["New-TFGraph","tfGraph"] ,
+            "Usage": {"Synopsis": "Draws a graph of the resources in the current configuration"},
+            "Description": "Calls terraform graph, if the PSGraphModule is present converts the graphviz output to something viewable",
+            "OriginalName": "terraform",
+            "OriginalCommandElements": [
+                "graph"
+            ],
+            "Parameters": [
+                {
+                    "Name": "Path",
+                    "Position": 0,
+                    "Description": "Path for the outputfile",
+                    "ParameterType": "String",
+                    "OriginalPosition": -1
+                },
+                {
+                    "Name": "ShowGraph",
+                    "Position": 1,
+                    "ParameterType": "switch",
+                    "OriginalPosition": -1
+                }
+            ],
+            "OutputHandlers": [
+                {
+                "ParameterSetName": "Default",
+                "StreamOutput": true,
+                "HandlerType": "Function",
+                "Handler": "rendertfgraph -Path $Path -ShowGraph:$ShowGraph $input"
+                }
+            ]
+        }
+    ]
+
+}
+

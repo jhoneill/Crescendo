@@ -1,0 +1,286 @@
+
+terraform --version
+terraform import okta_app_saml.PFaroe_CharlesStanley
+terraform import okta_app_saml.PFaroe_CharlesStanley 0oa6isrqlbnvldvDX4x7
+terraform import azurerm_resource_group.rg  "/subscriptions/007104fc-5081-48d6-a1ff-aa2e24a50f69/resourceGroups/Terra"
+terraform init
+terraform plan
+terraform plan -out OktaApps.tfplan
+terraform plan -var resource_group_name=main-vnet -out vnet.tfplan
+terraform apply
+terraform apply "OktaApps.tfplan"
+terraform apply -var "resource_group_name=AnotherTFRG"
+terraform show -json
+terraform fmt
+terraform state list
+terraform state show okta_app_group_assignment.PFaroe_Athene_Admins
+terraform state pull
+terraform show -json | convertfrom-json
+terraform graph | Export-PSGraph -DestinationPath .\test.svg -OutputFormat svg -ShowGraph
+
+terraform init "-backend-config=backend-config.txt"
+
+<#
+  -backend=false          Disable backend or Terraform Cloud initialization for this configuration and use what what was previously initialized instead.
+                          aliases: -cloud=false
+
+  -backend-config=path    Configuration to be merged with what is in the configuration file's 'backend' block. This can be either a path to an HCL file
+                          with key/value assignments (same format as terraform.tfvars) or a 'key=value' format, and can be specified multiple times.
+                          The backend type must be in the configuration itself.
+
+  -force-copy             Suppress prompts about copying state data when initializating a new state backend.
+                          This is equivalent to providing a "yes" to all confirmation prompts.
+
+  -from-module=SOURCE     Copy the contents of the given module into the target directory before initialization.
+
+  -get=false              Disable downloading modules for this configuration.
+
+  -input=false            Disable interactive prompts. Note that some actions may require interactive prompts and will error if input is disabled.
+
+  -lock=false             Don't hold a state lock during backend migration. This is dangerous if others might concurrently runcommands against the same workspace.
+
+  -lock-timeout=0s        Duration to retry a state lock.
+
+  -no-color               If specified, output won't contain any color.
+
+  -plugin-dir             Directory containing plugin binaries. This overrides all default search paths for plugins, and
+                          prevents the automatic installation of plugins. This flag can be used multiple times.
+
+  -reconfigure            Reconfigure a backend, ignoring any saved configuration.
+
+  -migrate-state          Reconfigure a backend, and attempt to migrate any existing state.
+
+  -upgrade                Install the latest module and provider versions allowed within configured constraints,
+                          overriding the default behavior of selecting exactly the version recorded in the dependency lockfile.
+
+  -lockfile=MODE          Set a dependency lockfile mode. Currently only "readonly" is valid.
+
+  -ignore-remote-version  A rare option used for Terraform Cloud and the remote backend only. Set this to ignore checking that the local and remote
+                          Terraform versions use compatible state representations, makingan operation proceed even when there is a potential mismatch.
+                          See the documentation on configuring Terraform with Terraform Cloud for more information.
+
+#>
+
+
+$tv.provider_selections.Keys | foreach { [pscustomobject]@{Provider=$_;Version=$tv.provider_selections[$_]}}
+
+
+
+ function tfVersionJsonToObject {
+  $tfver = $input | ConvertFrom-Json -AsHashtable
+  $providers =  $tfver.provider_selections.Keys | ForEach-Object { [pscustomObject]@{Provider=$_;Version=$tv.provider_selections[$_]}}
+  [Pscustomobject][ordered]@{
+                    Platform  = $tfver.platform
+                    Version   = $tfver.terraform_version
+                    OutDated  = $tfver.terraform_outdated
+                    Providers = $Providers }
+  | Add-Member -TypeName TerraformVersion -PassThru
+ }
+
+
+
+ $ terraform validate -json
+{
+  "format_version": "1.0",
+  "valid": false,
+  "error_count": 2,
+  "warning_count": 0,
+  "diagnostics": [
+    {
+      "severity": "error",
+      "summary": "Reference to undeclared resource",
+      "detail": "A managed resource \"auth0_client\" \"terraform-secure-express\" has not been declared in the root module.",
+      "range": {
+        "filename": "docker.tf",
+        "start": {
+          "line": 13,
+          "column": 29,
+          "byte": 337
+        },
+        "end": {
+          "line": 13,
+          "column": 66,
+          "byte": 374
+        }
+      },
+      "snippet": {
+        "context": "resource \"docker_container\" \"terraform-secure-express\"",
+        "code": "    \"AUTH0_CLIENT_ID     =${auth0_client.terraform-secure-express.client_id}\",",
+        "start_line": 13,
+        "highlight_start_offset": 28,
+        "highlight_end_offset": 65,
+        "values": []
+      }
+    },
+    {
+      "severity": "error",
+      "summary": "Reference to undeclared resource",
+      "detail": "A managed resource \"auth0_client\" \"terraform-secure-express\" has not been declared in the root module.",
+      "range": {
+        "filename": "docker.tf",
+        "start": {
+          "line": 14,
+          "column": 29,
+          "byte": 416
+        },
+        "end": {
+          "line": 14,
+          "column": 66,
+          "byte": 453
+        }
+      },
+      "snippet": {
+        "context": "resource \"docker_container\" \"terraform-secure-express\"",
+        "code": "    \"AUTH0_CLIENT_SECRET =${auth0_client.terraform-secure-express.client_secret}\",",
+        "start_line": 14,
+        "highlight_start_offset": 28,
+        "highlight_end_offset": 65,
+        "values": []
+      }
+    }
+  ]
+}
+
+$ terraform validate -json
+{
+  "format_version": "1.0",
+  "valid": true,
+  "error_count": 0,
+  "warning_count": 0,
+  "diagnostics": []
+}
+
+
+terraform plan -json -out ./auth0.tfplan
+{"@level":"info","@message":"Terraform 1.1.7","@module":"terraform.ui","@timestamp":"2022-05-18T12:55:57.207670+01:00","terraform":"1.1.7","type":"version","ui":"1.0"}
+{"@level":"error","@message":"Error: Reference to undeclared input variable","@module":"terraform.ui","@timestamp":"2022-05-18T12:55:57.511262+01:00","diagnostic":{"severity":"error","summary":"Reference to undeclared input variable","detail":"An input variable with the name \"auth0_clientId\" has not been declared. Did you mean \"auth0_client_id\"?","range":{"filename":"auth0.tf","start":{"line":20,"column":67,"byte":668},"end":{"line":20,"column":85,"byte":686}},"snippet":{"context":"resource \"auth0_connection\" \"terraform-express-user-db\"","code":"    enabled_clients = [ auth0_client.terraform-secure-express.id, var.auth0_clientId ]","start_line":20,"highlight_start_offset":66,"highlight_end_offset":84,"values":[]}},"type":"diagnostic"}
+
+terraform validate -json
+{
+  "format_version": "1.0",
+  "valid": false,
+  "error_count": 1,
+  "warning_count": 0,
+  "diagnostics": [
+    {
+      "severity": "error",
+      "summary": "Reference to undeclared input variable",
+      "detail": "An input variable with the name \"auth0_clientId\" has not been declared. Did you mean \"auth0_client_id\"?",
+      "range": {
+        "filename": "auth0.tf",
+        "start": {
+          "line": 20,
+          "column": 67,
+          "byte": 668
+        },
+        "end": {
+          "line": 20,
+          "column": 85,
+          "byte": 686
+        }
+      },
+      "snippet": {
+        "context": "resource \"auth0_connection\" \"terraform-express-user-db\"",
+        "code": "    enabled_clients = [ auth0_client.terraform-secure-express.id, var.auth0_clientId ]",
+        "start_line": 20,
+        "highlight_start_offset": 66,
+        "highlight_end_offset": 84,
+        "values": []
+      }
+    }
+  ]
+}
+
+$ terraform init
+
+Initializing the backend...
+
+Initializing provider plugins...
+- Reusing previous version of kreuzwerker/docker from the dependency lock file
+- Finding auth0/auth0 versions matching "0.30.2"...
+- Using previously-installed kreuzwerker/docker v2.16.0
+- Installing auth0/auth0 v0.30.2...
+- Installed auth0/auth0 v0.30.2 (signed by a HashiCorp partner, key ID E90AC7E443354779)
+
+Partner and community providers are signed by their developers.
+If you'd like to know more about provider signing, you can read about it here:
+https://www.terraform.io/docs/cli/plugins/signing.html
+
+Terraform has made some changes to the provider dependency selections recorded
+in the .terraform.lock.hcl file. Review those changes and commit them to your
+version control system if they represent changes you intended to make.
+
+Terraform has been successfully initialized!
+
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
+
+ terraform init -no-color | & {$input | Select-String "Installed|initialized" -NoEmphasis}
+
+- Using previously-installed okta/okta v3.24.0
+- Using previously-installed auth0/auth0 v0.30.2
+Terraform has been successfully initialized!
+
+#515 PS7 ~\Documents\Azdo\terraform> $I | Select-String "Installed|initialized" -NoEmphasis
+
+- Installed auth0/auth0 v0.30.2 (signed by a HashiCorp partner, key ID E90AC7E443354779)
+- Using previously-installed okta/okta v3.24.0
+Terraform has been successfully initialized!
+
+
+terraform plan -json -out ./auth0.tfplan
+{"@level":"info","@message":"Terraform 1.1.7","@module":"terraform.ui","@timestamp":"2022-05-18T12:55:57.207670+01:00","terraform":"1.1.7","type":"version","ui":"1.0"}
+{"@level":"error","@message":"Error: Reference to undeclared input variable","@module":"terraform.ui","@timestamp":"2022-05-18T12:55:57.511262+01:00","diagnostic":{"severity":"error","summary":"Reference to undeclared input variable","detail":"An input variable with the name \"auth0_clientId\" has not been declared. Did you mean \"auth0_client_id\"?","range":{"filename":"auth0.tf","start":{"line":20,"column":67,"byte":668},"end":{"line":20,"column":85,"byte":686}},"snippet":{"context":"resource \"auth0_connection\" \"terraform-express-user-db\"","code":"    enabled_clients = [ auth0_client.terraform-secure-express.id, var.auth0_clientId ]","start_line":20,"highlight_start_offset":66,"highlight_end_offset":84,"values":[]}},"type":"diagnostic"}
+
+terraform validate -json
+{
+  "format_version": "1.0",
+  "valid": false,
+  "error_count": 1,
+  "warning_count": 0,
+  "diagnostics": [
+    {
+      "severity": "error",
+      "summary": "Reference to undeclared input variable",
+      "detail": "An input variable with the name \"auth0_clientId\" has not been declared. Did you mean \"auth0_client_id\"?",
+      "range": {
+        "filename": "auth0.tf",
+        "start": {
+          "line": 20,
+          "column": 67,
+          "byte": 668
+        },
+        "end": {
+          "line": 20,
+          "column": 85,
+          "byte": 686
+        }
+      },
+      "snippet": {
+        "context": "resource \"auth0_connection\" \"terraform-express-user-db\"",
+        "code": "    enabled_clients = [ auth0_client.terraform-secure-express.id, var.auth0_clientId ]",
+        "start_line": 20,
+        "highlight_start_offset": 66,
+        "highlight_end_offset": 84,
+        "values": []
+      }
+    }
+  ]
+}
+
+$import = terraform import auth0_client.charlesStanley  SidgtPx9gpcCHNNxpB5zXzTbWHROlAXN
+#585 PS7 ~\Documents\Azdo\terraform> $import
+auth0_client.charlesStanley: Importing from ID "SidgtPx9gpcCHNNxpB5zXzTbWHROlAXN"...
+auth0_client.charlesStanley: Import prepared!
+  Prepared auth0_client for import                                                                                                                                                                            
+auth0_client.charlesStanley: Refreshing state... [id=SidgtPx9gpcCHNNxpB5zXzTbWHROlAXN]
+
+Import successful!
+
+The resources that were imported are shown above. These resources are now in 
+your Terraform state and will henceforth be managed by Terraform.

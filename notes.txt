@@ -1,0 +1,15 @@
+Help should not put multi-line output of command -? into synopsis (which should be one line). Value of it is dubious in description
+Help doesn't build correctly if synopsis is present without a description.
+Error for non streamed output when command returns nothing and runs handler $result with a null result
+Use of | & does not work well with inline scripts.
+dd sample creates a parameter named Input which is an automatic variable
+dirproxy sample refers to non-existent win elevate command.
+ifconfig sample has place holders where help should be, doesn't parse output and just turns ifconfig into invoke-ifconfig. The benefit is ?
+ApplyToExecutable is missing from the Parameterinfo definition in the JSON Schema File.
+A PowerShell command named "Invoke-Some_other_command" says it is doing nothing useful (ifconfig, tar, who ,ls, dd examples )
+No check for correct OS when command is marked as Linux/mac/windows only
+if ($verbose) {write-verbose -verbose}  is just plain wrong
+Don't make a function or method to make a only one call to it use regions.
+Don't build small blocks of text with a script builder.
+
+Creation commands should take as many properties as possible.
