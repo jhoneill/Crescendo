@@ -166,8 +166,7 @@ class ParameterInfo {
         if ( $this.Mandatory )                       { $elements += 'Mandatory=$true' }
         if ( $this.ParameterSetName.Count)           {
             foreach($parameterSetName in $this.ParameterSetName) {
-                $elements   =  @("ParameterSetName='$parameterSetName'") + $elements
-                $paramText +=  '    [Parameter(' + ($elements -join ",") + ")]`n"
+                $paramText +=  '    [Parameter(' + ((@("ParameterSetName='$parameterSetName'") + $elements) -join ",") + ")]`n"
             }
         }
         elseif ($elements.Count -gt 0)               {
@@ -300,7 +299,6 @@ class Command       {
         else {
             $commandBlock = @'
     #region invoke the command with arguments and handle results
-    Write-Verbose -Message ("<#ORIGINALNAME#> $commandArgs")
     if ($boundParameters["Debug"])   {Wait-Debugger}
 
     $handlerInfo = $outputHandlers[$PSCmdlet.ParameterSetName]
@@ -309,7 +307,7 @@ class Command       {
 
 '@
             if ($this.SupportsShouldProcess) {$commandBlock += @'
-    if ( $PSCmdlet.ShouldProcess("<#OriginalName#> $commandArgs")) {
+    if ( $PSCmdlet.ShouldProcess("<#PRERUNMESSAGE#>")) {
         if ( $handlerInfo.StreamOutput ) { & <#THECOMMAND#> | & $handler}
         else {
             $result = & <#THECOMMAND#>
@@ -319,6 +317,7 @@ class Command       {
     #endregion
 '@      }
             else {$commandBlock += @'
+    Write-Verbose -Message ("& <#PRERUNMESSAGE#>")
     if ( $handlerInfo.StreamOutput ) { & <#THECOMMAND#> | & $handler}
     else {
         $result = & <#THECOMMAND#>
@@ -332,7 +331,7 @@ class Command       {
                     $theCommand       = '"{0}" {1} "{2}" $commandArgs' -f $this.Elevation.Command, $elevationArgs, $this.OriginalName
              }
             else {  $theCommand       = '"{0}" $commandArgs'           -f  $this.OriginalName }
-            $commandblock = $commandBlock.Replace("<#THECOMMAND#>",$theCommand)
+            $commandblock = $commandBlock.Replace("<#THECOMMAND#>",$theCommand).Replace("<#PRERUNMESSAGE#>",($theCommand.Replace('"','""')))
             $theFunction  = $thefunction.Replace('<#COMMANDBLOCK#>', $commandBlock)
         }
         #endregion
