@@ -5,6 +5,7 @@
             "Verb": "Invoke",
             "Noun": "who",
             "OriginalName":"/usr/bin/who",
+            "Platform": ["Linux"],
             "Parameters": [
                 {
                     "Name":"BootTime",

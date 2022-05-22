@@ -2,40 +2,41 @@
    "$schema": "https://aka.ms/PowerShell/Crescendo/Schemas/2021-11",
    "Commands": [
         {
-        "Verb": "Install",
-        "Noun": "Program",
-        "OriginalName": "msiexec",
-        "Platform": [
-            "Windows",
-            "Linux",
-            "MacOS"
-        ],
-        "SupportsShouldProcess": false,
-        "SupportsTransactions": false,
-        "NoInvocation": false,
-        "Parameters": [
-            {
-            "ParameterType": "string",
-            "Position": 2147483647,
-            "Name": "UIMode",
-            "OriginalName": "/q",
-            "Description": "Specifies the UI during the installation process.",
-            "ApplyToExecutable": false,
-            "DefaultValue": "Basic",
-            "ValueMap": {
-                "Reduced": "r",
-                "None": "n",
-                "Basic": "b",
-                "Full": "f"
-            },
-            "OriginalPosition": 0,
-            "ValueFromPipeline": false,
-            "ValueFromPipelineByPropertyName": false,
-            "ValueFromRemainingArguments": false,
-            "NoGap": true
-            }
-        ],
-        "Examples": []
+            "Verb": "Install",
+            "Noun": "Program",
+            "OriginalName": "msiexec",
+            "Platform": [
+                "Windows",
+                "Linux",
+                "MacOS"
+            ],
+            "SupportsShouldProcess": false,
+            "SupportsTransactions": false,
+            "NoInvocation": false,
+            "Parameters": [
+                {
+                    "ParameterType": "string",
+                    "Position": 2147483647,
+                    "Name": "UIMode",
+                    "OriginalName": "/q",
+                    "Description": "Specifies the UI during the installation process.",
+                    "ApplyToExecutable": false,
+                    "DefaultValue": "Basic",
+                    "Mandatory": false,
+                    "ValueMap": {
+                        "Reduced": "r",
+                        "None": "n",
+                        "Basic": "b",
+                        "Full": "f"
+                    },
+                    "OriginalPosition": 0,
+                    "ValueFromPipeline": false,
+                    "ValueFromPipelineByPropertyName": false,
+                    "ValueFromRemainingArguments": false,
+                    "NoGap": true
+                }
+            ],
+            "Examples": []
         }
    ]
 }
