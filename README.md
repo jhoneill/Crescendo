@@ -1,66 +1,32 @@
 # PowerShell Crescendo
 
-Crescendo is a development accelerator enabling you to rapidly build PowerShell cmdlets that
-leverage existing command-line tools. Crescendo amplifies the command-line experience of the
-original tool to include object output for the PowerShell pipeline, privilege elevation, and
-integrated help information. A Crescendo module replaces cumbersome command-line tools with
-PowerShell cmdlets that are easier to use in automation and packaged to share with team members.
+So what is my fork which isn't in the original?
 
-The 1.0.0 release includes the following features and benefits:
+## Changes to build process
 
-- Ability to define cmdlets from simple `key/value` statements in a JSON file
-- Support for modular design - cmdlet definitions can be in a one or more JSON files
-- A JSON schema that helps you create your Crescendo configuration using IntelliSense and tooltips
-- Three styles of output handling code allowing you to separate your code from the cmdlet
-  definitions for easier debugging and development
-- Privilege elevation mechanisms in **Windows**, **Linux**, and **macOS**
-- Crescendo generates a PowerShell script module ready for deployment
-- While Crescendo requires PowerShell 7 or higher for authoring configurations, the generated module
-  can run on Windows PowerShell 5.1 and higher
-- Example configurations for you to copy and reuse
-- Experimental Help parsers that provide proof-of-concept examples for auto-generating cmdlet
-  configurations
+- `Export-CrescendoCommand`  now exports JSON with a commands section as expected by `Import-CommandConfiguration` and `Import-CommandConfiguration` also reads single items
+- `Export-CrescendoCommand`  will take a file path as well as directory; and will put multiple commands in the same commands block if given a file path. It continues to make individual one if no path or a directory is given.
+- `Export-CrescendoModule`   Supports additional parameters for New-ModuleManifest and preserves entries in any existing PSD1 file
+- `Export-CrescendoModule`   Can now export command objects without converting them to JSON first.
+- `Export-CrescendoModule`   Also de-duplicates helper functions. This required an additional version of \[command\].ToString() with option to output *without* helper functions and new method \[command\].GetHelperFunctions() to return a hash-table of function-name = function-body
+- Output Handlers now have a default parameter set of "Default" - blank sets caused problems  
+- The build process now has the bulk of output in here-strings at the top of the file, and ALL the string builder line by line build-ups have been removed. They made it impossible to see the function structure, and made things slower. (String builder is a benefit when doing hundreds or thousands of string concatenate operations).
+- Variable names, and layout have been made consistent (there was a mix of brace styles, and multiple variable naming conventions)
 
-## Installing Crescendo
+## Changes to output
 
-Requirements:
-
-- **Microsoft.PowerShell.Crescendo** requires PowerShell 7.0 or higher
-
-To install **Microsoft.PowerShell.Crescendo**:
-
-```powershell
-Install-Module -Name Microsoft.PowerShell.Crescendo
-```
-
-To install **Microsoft.PowerShell.Crescendo** using the new
-[PowerShellGet.v3](https://www.powershellgallery.com/packages/PowerShellGet/3.0.12-beta)
-
-```powershell
-Install-PSResource -Name Microsoft.PowerShell.Crescendo
-```
-
-## Documentation and more information
-
-To get started using Crescendo, check out the
-[documentation](https://docs.microsoft.com/powershell/utility-modules/crescendo/overview).
-
-For a detailed walkthrough using Crescendo, see this excellent blog series from Sean Wheeler -
-Thanks Sean!
-
-- Crescendo on the [PowerShell Community Blog](https://devblogs.microsoft.com/powershell-community/tag/crescendo/).
-
-## Future plans
-
-We value your ideas and feedback and hope you will give Crescendo a try and let us know of any
-issues you find.
-
-## Release history
-
-Release announcements on the [PowerShell Blog](https://devblogs.microsoft.com/powershell/tag/powershell-crescendo/).
-
-- 12/20 - Crescendo.Preview.1
-- 05/21 - Crescendo.Preview.2
-- 07/21 - Crescendo.Preview.3
-- 10/21 - Crescendo.Preview.4
-- 12/21 - Crescendo.RC
+- Help
+  - Putting the multi-line output of `command -?` into synopsis has been removed, because (a) Synopsis should be a single line, and (b) it told people how to use a different command
+  - Fixed Help not building correctly if synopsis was present without a description.
+  - Help now appears at the start of a function, not the end.
+- PreLaunch
+  - Added support for "value-maps" e.g. `{"Reduced": "r", "None": "n", "Basic": "b", "Full": "f"}` creates
+    `[ValidateSet('Basic', 'Reduced', 'None', 'Full')]`, and translates those to the initials in the map.
+  - Added a check for the correct OS when a command is marked as Linux/Mac/Windows only
+  - Moved the location of the test for presence of the command-to-be-launched to an earlier point.
+  - Code to add arguments from parameters before and after fixed arguments has been cleaned up. Common parts have been moved to a helper function, and code is omitted when the definition has no "before" and/or no "after" items .
+- Command launching
+  - Fixed an error for non streamed output when the command returns nothing and runs `handler $result` with a null result
+  - Modified process for functions so a handler can be `| function -param1 -param2 value` 
+  - `if ($psCmdlet.shouldProcess ...` is now only included if if ShouldProcess is if specified for the command
+  - `if ($verbose) {write-verbose-verbose  <whatever the command is> }` has been replaced with Write-Verbose when ShouldProcess is NOT present.

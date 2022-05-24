@@ -4,6 +4,7 @@
 # OM VERSION 1.2
 # =========================================================================
 using namespace System.Collections.Generic
+using namespace System.Management.Automation
 
 $FunctionTemplate   = @'
 function <#FUNCTIONNAME#> {
@@ -34,9 +35,8 @@ function <#FUNCTIONNAME#> {
     #region build the list of command line argumnets
     $commandArgs            = @()
 <#BUILDARGS#>
-
     $commandArgs = $commandArgs | Where-Object {$_ -ne $null} # strip only nulls
-    #endregionn
+    #endregion
 
 <#COMMANDBLOCK#>
   }
@@ -69,7 +69,7 @@ $LateParameters     = @'
             $commandArgs += NewArgument $boundParameters[$_]  $parameterMap[$_]  #only have parameters where $parameterMap[that name].Original postion >=, so this always returns a value
     }
 '@
-#if NoInvocation is specified we skip the command block; otherwise it's a fixed part and parts asking shouldProcess or not asking.
+#if NoInvocation is specified we skip the command block; otherwise it's a fixed part and a part to ask shouldProcess or a part which doesn't  ask.
 $cmdblockStart      = @'
     #region invoke the command with arguments and handle results
     if ($boundParameters["Debug"])   {Wait-Debugger}
@@ -100,22 +100,22 @@ $cmdblockAlways     = @'
 '@
 $HelperFunctions    = [ordered]@{NewArgument=@'
 function NewArgument {
-        param  ($value, $param)
-            if ($value -is [switch]) {
-                 if ($value.IsPresent) {
-                     if ($param.OriginalName)        { $param.OriginalName }
-                 }
-                 elseif ($param.DefaultMissingValue) { $param.DefaultMissingValue }
-            }
-            elseif ( $param.NoGap -and
-                     $value -match "\s" )            { "$($param.OriginalName)""$value"""}
-            elseif ( $param.NoGap )                  { "$($param.OriginalName)$value"}
-
-            else {
-                if($param.OriginalName)              {  $param.OriginalName }
-                $value | Foreach-Object {$_}
-            }
+    param  ($value, $param)
+    if ($value -is [switch]) {
+        if ($value.IsPresent) {
+            if ($param.OriginalName)        {  $param.OriginalName }
+        }
+        elseif ($param.DefaultMissingValue) {  $param.DefaultMissingValue }
     }
+    elseif (    $param.NoGap -and
+                   $value -match "\s" )     { "$($param.OriginalName)""$value"""}
+    elseif (    $param.NoGap )              { "$($param.OriginalName)$value"}
+
+    else {
+        if (    $param.OriginalName)        {  $param.OriginalName }
+        $value
+    }
+}
 '@}
 $ModuleStart        = @'
 # Module created by Microsoft.PowerShell.Crescendo
@@ -214,12 +214,12 @@ class CrescendoCommandInfo {
     [string]$Name
     [bool]$IsCrescendoCommand
     [bool]$RequiresElevation
-    CrescendoCommandInfo([string]$module, [string]$name, [Attribute]$attribute) {
-        $this.Module = $module
-        $this.Name   = $name
-        $this.IsCrescendoCommand = $null -eq $attribute ? $false : ($attribute.Source -eq "Microsoft.PowerShell.Crescendo")
-        $this.RequiresElevation  = $null -eq $attribute ? $false :  $attribute.RequiresElevation
-        $this.Source             = $null -eq $attribute ? ""     :  $attribute.Source
+    CrescendoCommandInfo([string]$Module, [string]$Name, [Attribute]$Attribute) {
+        $this.Module             = $Module
+        $this.Name               = $Name
+        $this.IsCrescendoCommand = $null -eq $Attribute ? $false : ($Attribute.Source -eq "Microsoft.PowerShell.Crescendo")
+        $this.RequiresElevation  = $null -eq $Attribute ? $false :  $Attribute.RequiresElevation
+        $this.Source             = $null -eq $Attribute ? ""     :  $Attribute.Source
     }
 }
 
@@ -337,11 +337,12 @@ class ParameterInfo        {
 
 class OutputHandler        {
     [string]    $ParameterSetName
-    [string]    $Handler     # This is a scriptblock which does the conversion to an object
-    [string]    $HandlerType # Inline, Function, or Script
+    [string]    $Handler       # This is a scriptblock which does the conversion to an object
+    [string]    $HandlerType   # Inline, Function, or Script
     [bool]      $StreamOutput  # this indicates whether the output should be streamed to the handler
     OutputHandler() {
-        $this.HandlerType = "Inline" # default is an inline script
+        $this.HandlerType      = "Inline" # default is an inline script
+        $this.ParameterSetName = 'Default'
     }
     [string]ToString() {
         if     ($this.HandlerType -eq "Inline" -or ($this.HandlerType -eq "Function" -and $this.Handler -match '\s')) {
@@ -568,7 +569,7 @@ function Test-Handler      {
         [Parameter(Mandatory=$true)][string]$script,
         [Parameter(Mandatory=$true)][ref]$parserErrors
     )
-    $null = [System.Management.Automation.Language.Parser]::ParseInput($script, [ref]$null, $parserErrors)
+    $null = [Language.Parser]::ParseInput($script, [ref]$null, $parserErrors)
     (0 -eq $parserErrors.Value.Count)
 }
 
@@ -626,9 +627,9 @@ function New-OutputHandler    {
     [alias('CrescendoHandler')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions","")]
     param (
-        [ValidateSet('Inline','Script','Funtion')]
-        [Alias('HandlerType')]
-        $Type = 'Funtion',
+        [ValidateSet('Inline','Script','Function')]
+        [Alias('Type')]
+        $HandlerType = 'Function',
         $Handler,
         $ParameterSetName,
         [switch]$StreamOutput
@@ -642,11 +643,28 @@ function New-CrescendoCommand {
     param (
         [Parameter(Position=0,Mandatory=$true)][string]$Verb,
         [Parameter(Position=1,Mandatory=$true)][string]$Noun,
-        [Parameter(Position=2)][string]$OriginalName
+        [Parameter(Position=2)][string]$OriginalName,
+        [Parameter(Position=3)][List[ParameterInfo]] $Parameters,
+        # e.g. "cubectl get user" -> "get", "user"
+        [string[]]$OriginalCommandElements,
+        [OutputHandler[]]$OutputHandlers,
+        [string]$Description,
+        [UsageInfo]$Usage,
+        [List[ExampleInfo]]$Examples,
+        [string]$OriginalText,
+        [string[]]$HelpLinks,
+        [ValidateSet("Windows","Linux","MacOS")]
+        [string[]]$Platform     = @("Windows","Linux","MacOS"),
+        [Elevation]$Elevation,
+        [string[]]$Aliases,
+        [string]$DefaultParameterSetName,
+        [string]$ConfirmImpact,
+        [switch]$SupportsShouldProcess,
+        [switch]$SupportsTransactions,
+        # certain scenarios want to use the generated code as a front end. When true, the generated code will return the arguments only.
+        [switch]$NoInvocation
     )
-    $cmd = [Command]::new($Verb, $Noun)
-    $cmd.OriginalName = $OriginalName
-    $cmd
+    New-Object -TypeName Command -ArgumentList  $Verb, $Noun -Property $PSBoundParameters
 }
 
 function Export-CrescendoCommand {
@@ -655,25 +673,64 @@ function Export-CrescendoCommand {
         [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
         [Command[]]$Command,
         [Alias('TargetDirectory')]
-        [string]$Path = $pwd.path
+        [string]$Path = $pwd.path,
+        [alias('pt')]
+        [switch]$PassThru
     )
-
     process {
+        $filesAllowed = @{}
         foreach($crescendoCommand in $Command) {
             if (Test-Path -Path $Path -PathType Container) {
                 $exportPath = Join-Path -Path  $Path -ChildPath "$($crescendoCommand.Verb)-$($crescendoCommand.Noun).crescendo.json"
             }
             elseif (Test-Path -IsValid $Path -PathType Leaf) {$exportPath = $Path}
             else   {throw "$Path must be a direcory or a valid file path."}
-            if($PSCmdlet.ShouldProcess($exportPath)) {
-                Set-Content -Path $exportPath -Confirm:$false -Value @"
-{
-   "`$schema": "https://aka.ms/PowerShell/Crescendo/Schemas/2021-11",
-   "Commands": [
-        $($crescendoCommand.GetCrescendoConfiguration() -replace '\n',"`n        ")
-   ]
+
+            #if we have already sent something to this file add ",", newline, and the JSON for this command - but don't close the JSON yet.
+            if ($filesAllowed.ContainsKey($exportPath)) {
+                $filesAllowed[$exportPath] +=
+                    ",`n        " + ($crescendoCommand.GetCrescendoConfiguration() -replace '\n',"`n        ")
+            }
+            #If not, check we are allowed to output to it, and add the opening and the first command but leave the JSON open.
+            elseif ($PSCmdlet.ShouldProcess($exportPath)) {
+                $filesAllowed[$exportPath] =
+                     "{`n" +
+                     "    `"`$schema`": `"https://aka.ms/PowerShell/Crescendo/Schemas/2021-11`",`n"+
+                     "    `"Commands`": [`n        " +
+                                   ($crescendoCommand.GetCrescendoConfiguration() -replace '\n',"`n        " )
+            }
+        }
+    }
+    end {
+        foreach ($exportPath in $filesAllowed.Keys)  {
+            #close the json that was left open when we added the command(s) and write the file
+            Set-Content -Confirm:$false -Path $exportPath -Value ($filesAllowed[$exportPath] + "`n   ]`n}")
+            if ($PassThru) {Get-item $exportPath}
+        }
+    }
 }
-"@          }
+
+function Test-IsCrescendoCommand {
+    [CmdletBinding()]
+    param   (
+        [Parameter(ValueFromPipeline=$true,Mandatory=$true,Position=0)]
+        [object[]]$Command
+    )
+    process {
+        # loop through the commands and determine whether it is a Crescendo Function
+        foreach( $cmd in $Command) {
+            $fInfo = $null
+            if ($cmd -is [FunctionInfo]) {$fInfo = $cmd}
+            elseif ($cmd -is [string]) {
+                $fInfo = Get-Command -Name $cmd -CommandType Function -ErrorAction Ignore
+            }
+            if(-not $fInfo) {
+                Write-Error -Message "'$cmd' is not a function" -TargetObject "$cmd" -RecommendedAction "Be sure that the command is a function"
+                continue
+            }
+            #  check for the PowerShellFunctionAttribute and report on findings
+            $crescendoAttribute = $fInfo.ScriptBlock.Attributes | Where-Object {$_.TypeId.Name -eq "PowerShellCustomFunctionAttribute"} | Select-Object -Last 1
+            [CrescendoCommandInfo]::new($fInfo.Source, $fInfo.Name, $crescendoAttribute)
         }
     }
 }
@@ -705,22 +762,22 @@ function Import-CommandConfiguration {
 }
 
 function Test-Configuration {
-    param ([Command]$Configuration, [ref]$errors)
+    param (
+        [Command]$Configuration,
+        [ref]$errors
+    )
 
-    $configErrors = @()
-    $configurationOK = $true
+    $configErrors     = @()
+    $configurationOK  = $true
 
     # Validate the Platform types
     $allowedPlatforms = "Windows","Linux","MacOS"
     foreach($platform in $Configuration.Platform) {
         if ($allowedPlatforms -notcontains $platform) {
             $configurationOK = $false
-            $e = [System.Management.Automation.ErrorRecord]::new(
+            $configErrors   += [ErrorRecord]::new(
                 [Exception]::new("Platform '$platform' is not allowed. Use 'Windows', 'Linux', or 'MacOS'"),
-                "ParserError",
-                "InvalidArgument",
-                "Import-CommandConfiguration:Platform")
-            $configErrors += $e
+                "ParserError", "InvalidArgument", "Import-CommandConfiguration:Platform")
         }
     }
 
@@ -728,79 +785,126 @@ function Test-Configuration {
     foreach ( $handler in $configuration.OutputHandlers ) {
         $parserErrors = $null
         if ( -not (Test-Handler -Script $handler.Handler -ParserErrors ([ref]$parserErrors))) {
-            $configurationOK = $false
-            $exceptionMessage = "OutputHandler Error in '{0}' for ParameterSet '{1}'" -f $configuration.FunctionName, $handler.ParameterSetName
-            $e = [System.Management.Automation.ErrorRecord]::new(
-                ([Exception]::new($exceptionMessage)),
-                "Import-CommandConfiguration:OutputHandler",
-                "ParserError",
-                $parserErrors)
-            $configErrors += $e
+            $configurationOK  = $false
+            $configErrors += [ErrorRecord]::new(
+                ([Exception]::new("OutputHandler Error '$($parserErrors[0].Message)' in '$($configuration.FunctionName)' for ParameterSet '$($handler.ParameterSetName)'")),
+                "Import-CommandConfiguration:OutputHandler","ParserError",$parserErrors)
         }
     }
-    if ($configErrors.Count -gt 0) {
-        $errors.Value = $configErrors
-    }
-
+    if ($configErrors.Count -gt 0) {$errors.Value = $configErrors}
     return $configurationOK
 
 }
 
 function Export-CrescendoModule {
-    [CmdletBinding(SupportsShouldProcess=$true)]
+    [CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName='Files')]
     param   (
-        [Parameter(Position=1,Mandatory=$true,ValueFromPipelineByPropertyName=$true)][SupportsWildcards()][string[]]$ConfigurationFile,
-        [Parameter(Position=0,Mandatory=$true)][string]$ModuleName,
-        [Parameter()][switch]$Force
-        )
-    begin   {
-        [array]$crescendoCollection = @()
-        if ($ModuleName -notmatch "\.psm1$")          { $ModuleName += ".psm1"}
-        if ((Test-Path $ModuleName) -and -not $Force) {throw "$ModuleName already exists"}
-        if (-not $PSCmdlet.ShouldProcess("Creating Module '$ModuleName'")) {return}
+        [Parameter(Position=0,Mandatory=$true)]
+        [alias('Name')]
+        [string]$ModuleName,
 
-        # static parts of the crescendo module
-        Set-content -Path $ModuleName -Value $script:ModuleStart
-        $moduleBase = [System.IO.Path]::GetDirectoryName($ModuleName)
+        [Parameter(Position=1,ValueFromPipeline=$true,ParameterSetName='Files',Mandatory=$true)]
+        [SupportsWildcards()]
+        [string[]]$ConfigurationFile,
+
+        [Parameter(ParameterSetName='CommandObjects',Mandatory=$true)]
+        [Command[]]$Commands,
+        [alias('PT')]
+        [switch]$PassThru,
+        [switch]$Force
+    )
+    #Import the parameters from New-ModuleManifest
+    DynamicParam {
+        $paramDictionary     =    New-Object -TypeName RuntimeDefinedParameterDictionary
+        $attributeCollection =    New-Object -TypeName System.Collections.ObjectModel.Collection[System.Attribute]
+        $attributeCollection.Add((New-Object -TypeName ParameterAttribute -Property @{ ParameterSetName = "__AllParameterSets" ;Mandatory = $false}))
+        foreach ($P in (Get-Command -Name New-ModuleManifest).Parameters.values.where({$_.name -notmatch 'DSC|PassThru|Verbose|Debug|Action$|Variable$|OutBuffer|Confirm|Whatif|Path'}))  {
+            $paramDictionary.Add($p.Name, (New-Object -TypeName RuntimeDefinedParameter -ArgumentList $p.name, $p.ParameterType, $attributeCollection ) )
+        }
+        return $paramDictionary
+    }
+
+    begin   {
+        $crescendoCollection = @()
+        if ($ModuleName    -match '\.psd1$')          { $ModuleName  = $ModuleName -replace '\.psd1$', '.psm1'}
+        if ($ModuleName -notmatch '\.psm1$')          { $ModuleName += '.psm1'}
+        if ((Test-Path $ModuleName) -and -not $Force) {throw "$ModuleName already exists"}
+        if (-not ($Force -or $PSCmdlet.ShouldProcess($ModuleName,'Create Module'))) {
+            $DontWrite = $true
+        }
+        else {  # Add the  static parts of the crescendo module
+            Set-Content -Path $ModuleName -Value $script:ModuleStart -Confirm:$false
+            $moduleBase = [System.IO.Path]::GetDirectoryName($ModuleName)
+        }
     }
     process {
-        if ( $PSBoundParameters['WhatIf'] ) {return}
-        $resolvedConfigurationPaths = (Resolve-Path $ConfigurationFile).Path
-        foreach($file in $resolvedConfigurationPaths) {
-            Write-Verbose "Adding $file to Crescendo collection"
-            $crescendoCollection += Import-CommandConfiguration $file
+        if ($Commands) {$crescendoCollection = $Commands}
+        else {
+            #expand wildcards and report as file is processed
+            $resolvedConfigurationPaths = (Resolve-Path $ConfigurationFile).Path
+            foreach($file in $resolvedConfigurationPaths) {
+                Write-Verbose "Adding $file to Crescendo collection"
+                $crescendoCollection += Import-CommandConfiguration $file
+            }
         }
     }
-    end {
-        if ( $PSBoundParameters['WhatIf'] ) {return}
-         $ModuleManifestArguments            = @{
-            Path              = $ModuleName -Replace "psm1$","psd1"
-            RootModule        = [io.path]::GetFileName(${ModuleName})
-            Tags              = "CrescendoBuilt"
-            PowerShellVersion = "5.1.0"
-            CmdletsToExport   = @()
-            AliasesToExport   = @()
-            VariablesToExport = @()
-            FunctionsToExport = @()
-            PrivateData       = @{ CrescendoGenerated = Get-Date; CrescendoVersion = (Get-Module Microsoft.PowerShell.Crescendo).Version }
+    end     {
+        $psdPath                 = $ModuleName -Replace "psm1$","psd1"
+        $ModuleManifestArguments = @{
+                    Path              =  $psdPath
+                    CmdletsToExport   = @()
+                    VariablesToExport = @()
+                    Tags              = @()
+                    PrivateData       = @{}
+        }
+        if (Test-Path $psdPath)  {
+            $existing = Import-PowerShellDataFile -Path $psdPath
+            $existing.keys.where({$_ -in (Get-Command -Name New-ModuleManifest).Parameters.keys }).foreach({
+                    $ModuleManifestArguments[$_] = $existing[$_]
+            })
+            if ($existing.PrivateData.PSData) {
+                $existing.PrivateData.PSData.keys.where({$_ -in (Get-Command -Name New-ModuleManifest).Parameters.keys }).foreach({
+                    $ModuleManifestArguments[$_] = $existing.PrivateData.PSData[$_]
+                })
+                [void]$ModuleManifestArguments.PrivateData.remove('PSData')
+            }
+        }
+        #reset properties if they  were in an existing PSD1
+        $ModuleManifestArguments['AliasesToExport']                = @() + $crescendoCollection.Aliases
+        $ModuleManifestArguments['FunctionsToExport']              = @() + $crescendoCollection.FunctionName
+        $ModuleManifestArguments['PowerShellVersion']              = "5.1.0"
+        $ModuleManifestArguments['RootModule']                     = [System.io.path]::GetFileName(${ModuleName})
+        $ModuleManifestArguments.PrivateData['CrescendoVersion']   = (Get-Module Microsoft.PowerShell.Crescendo).Version
+        $ModuleManifestArguments.PrivateData['CrescendoGenerated'] =  Get-Date -Format 'o' # unambiguous format
+        if ($ModuleManifestArguments.Tags -notcontains 'CrescendoBuilt' ) {
+            $ModuleManifestArguments.Tags     +=     @('CrescendoBuilt')
         }
 
-        # include the windows helper if it has been included
+        #Extra functions and/or aliases can be passed via the cmdline.
+        $psboundParameters.keys.where({$_ -notmatch 'Verbose|Debug|PassThru|Action$|Variable$|OutBuffer|Confirm|Whatif|Commands|ConfigurationFile|ModuleName|Force'}).foreach({
+            $ModuleManifestArguments[$_] = $PSBoundParameters[$_]
+        })
+        if ($psboundParameters['WhatIf']) {
+            $ModuleManifestArguments | Out-String |  Write-Verbose -Verbose
+        }
+        if ($DontWrite) {return}
+        # insert the windows elevation helper if it is called
         if ($crescendoCollection.Elevation.Command -eq "Invoke-WindowsNativeAppWithElevation") {
-            "function Invoke-WindowsNativeAppWithElevation {" >> $ModuleName
-            $InvokeWindowsNativeAppWithElevationFunction >> $ModuleName
-            "}" >> $ModuleName
+            "function Invoke-WindowsNativeAppWithElevation {`n"  +
+            $InvokeWindowsNativeAppWithElevationFunction + "`n}" >> $ModuleName
         }
-
-        foreach($proxy in $crescendoCollection) {
-            # we need the aliases without value for the psd1
-            foreach ($a in $proxy.Aliases) {$ModuleManifestArguments.AliasesToExport += $_}
-            $ModuleManifestArguments.FunctionsToExport += $proxy.FunctionName
-            # when set to true, we will emit the Crescendo attribute
-            $proxy.ToString($true) >> $ModuleName
+        #Get the helper functions needed for everything in the collection, use a hash table to auto-deduplicate
+        $helpers = [ordered]@{}
+        foreach ($proxy in $crescendoCollection) {
+            $proxyHelpers = $proxy.GetHelperFunctions()
+            foreach ($k in $proxyHelpers.keys) {$helpers[$k] = $proxyHelpers[$k]}
         }
+        #Output the helper functions first, then the functions we build with the Crescendo attribute and skipping their helpers
+        foreach ($k in $helpers.keys) {$helpers[$k] + "`n" >> $ModuleName}
+        foreach ($proxy in $crescendoCollection) {$proxy.ToString($true,$true) >> $ModuleName}
+        #todo build filelist.
         New-ModuleManifest @ModuleManifestArguments
-
+        if ($PassThru) {Get-item $ModuleManifestArguments.Path}
         # copy the script output handlers into place
         foreach($handler in $crescendoCollection.OutputHandlers.where({$_.HandlerType -eq "Script"})) {
             $scriptInfo = Get-Command -ErrorAction Ignore -CommandType ExternalScript $handler.Handler
@@ -814,33 +918,6 @@ function Export-CrescendoModule {
                 }
                 Write-Error @errArgs
             }
-        }
-    }
-}
-
-function Test-IsCrescendoCommand {
-    [CmdletBinding()]
-    param (
-        [Parameter(ValueFromPipeline=$true,Mandatory=$true,Position=0)]
-        [object[]]$Command
-    )
-    PROCESS {
-        # loop through the commands and determine whether it is a Crescendo Function
-        foreach( $cmd in $Command) {
-            $fInfo = $null
-            if ($cmd -is [System.Management.Automation.FunctionInfo]) {
-                $fInfo = $cmd
-            }
-            elseif ($cmd -is [string]) {
-                $fInfo = Get-Command -Name $cmd -CommandType Function -ErrorAction Ignore
-            }
-            if(-not $fInfo) {
-                Write-Error -Message "'$cmd' is not a function" -TargetObject "$cmd" -RecommendedAction "Be sure that the command is a function"
-                continue
-            }
-            #  check for the PowerShellFunctionAttribute and report on findings
-            $crescendoAttribute = $fInfo.ScriptBlock.Attributes|Where-Object {$_.TypeId.Name -eq "PowerShellCustomFunctionAttribute"} | Select-Object -Last 1
-            [CrescendoCommandInfo]::new($fInfo.Source, $fInfo.Name, $crescendoAttribute)
         }
     }
 }
