@@ -60,6 +60,7 @@ $EarlyParameters    = @'
         Sort-Object {$parameterMap[$_].OriginalPosition} | Foreach-Object { # take those parameters which apply to the executable
         $commandArgs += NewArgument $boundParameters[$_]  $parameterMap[$_]  #only have parameters where $parameterMap[that name].Apply to executable is true, so this always returns a value
     }
+
 '@
 $LateParameters     = @'
     # Add parameters which don't apply to the executable - use a negative original position to say this only in the wrapper, not passed to the command.
@@ -68,6 +69,7 @@ $LateParameters     = @'
         Sort-Object {$parameterMap[$_].OriginalPosition} | Foreach-Object {
             $commandArgs += NewArgument $boundParameters[$_]  $parameterMap[$_]  #only have parameters where $parameterMap[that name].Original postion >=, so this always returns a value
     }
+
 '@
 #if NoInvocation is specified we skip the command block; otherwise it's a fixed part and a part to ask shouldProcess or a part which doesn't  ask.
 $cmdblockStart      = @'
@@ -84,7 +86,7 @@ $cmdblockProcess    = @'
         if ( $handlerInfo.StreamOutput ) { & <#THECOMMAND#> | & $handler}
         else {
             $result = & <#THECOMMAND#>
-            if ($result) {& $handler $result}
+            & $handler $result  # handler must be able to process an empty result
         }
     }
     #endregion
@@ -94,7 +96,7 @@ $cmdblockAlways     = @'
     if ( $handlerInfo.StreamOutput ) { & <#THECOMMAND#> | & $handler}
     else {
         $result = & <#THECOMMAND#>
-        if ($result) {& $handler $result}
+        & $handler $result  # handler must be able to process an empty result
     }
     #endregion
 '@

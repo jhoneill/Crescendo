@@ -96,8 +96,81 @@
                 "Handler": "rendertfgraph -Path $Path -ShowGraph:$ShowGraph $input"
                 }
             ]
+        },
+        {
+            "Verb": "Test",
+            "Noun": "TerraformFormat",
+            "Usage": {"Synopsis": "Calls terraform fmt -check and returns true or false depending on whether the format check passed"},
+            "OriginalName": "terraform",
+            "OriginalCommandElements": [ "fmt", "-check"],
+            "Parameters": [
+                {
+                    "Name": "Recurse",
+                    "Aliases": ["Recursive"],
+                    "Position": 0,
+                    "OriginalPosition": 2,
+                    "OriginalName": "-recursive",
+                    "ParameterType": "switch"
+                }
+            ],
+            "OutputHandlers": [
+                {
+                    "ParameterSetName": "Default",
+                    "StreamOutput": false,
+                    "HandlerType": "Function",
+                    "Handler": "tfFormatCheckOK"
+                }
+            ]
+        },
+        {
+            "Verb": "Format",
+            "Noun": "TerraformConfiguration",
+            "Aliases": ["Format-TF","tffmt"],
+            "Usage": {"Synopsis": "Calls terraform fmt and formats files "},
+            "OriginalName": "terraform",
+            "OriginalCommandElements": [ "fmt"],
+            "Parameters": [
+                {
+                    "Name": "Recurse",
+                    "Aliases": ["Recursive"],
+                    "Position": 0,
+                    "OriginalPosition": 2,
+                    "OriginalName": "-recursive",
+                    "ParameterType": "switch"
+                }
+            ],
+            "OutputHandlers": [
+                {
+                    "ParameterSetName": "Default",
+                    "StreamOutput": false,
+                    "HandlerType": "Function",
+                    "Handler": "tfFormatResults"
+                }
+            ]
+        },
+        {
+            "Verb": "Get",
+            "Noun": "TerraformState",
+            "Aliases": ["Get-TFState","tfshow"],
+            "Usage": {"Synopsis": "Calls terraform state and converts the results to objects"},
+            "OriginalName": "terraform",
+            "OriginalCommandElements": ["show", "-json"],
+            "Parameters": [
+            {
+            "Name": "Address",
+            "OriginalPosition": -1,
+            "DefaultValue": "*",
+            "ParameterType": "String",
+            "Description": "If specified, will filter the results to the selected address(es). Wildcards are allowed. "
+            }
+            ],
+            "OutputHandlers": [{
+                "ParameterSetName": "Default",
+                "StreamOutput": true,
+                "Handler": "tfStateJsonToObject -Address $Address $input",
+                "HandlerType": "Function"
+            }]
         }
     ]
-
 }
 

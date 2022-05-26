@@ -46,3 +46,54 @@ function tfVersionJsonToObject {
         $GVCode  | Export-PSGraph -DestinationPath $Path -OutputFormat $Matches[1] -ShowGraph:$ShowGraph
     }
  }
+
+function tfFormatCheckOK {
+    param ($Ignore)
+    return (!$lastExitCode)
+}
+
+function tfFormatResults {
+    param ($ChangedFiles)
+    if     ($ChangedFiles.count -gt 1 ) {Write-Host "$($ChangedFiles.count) files changed:" -ForegroundColor Green}
+    elseif ($ChangedFiles.count -eq 1 ) {Write-Host "1 file changed:" -ForegroundColor Green}
+    else                                {Write-Host "No files changed." -ForegroundColor Green}
+    $changedFiles
+}
+
+function tfStateJsonToObject {
+    param   (
+        [parameter(ValueFromPipeline=$true)]
+        $Json,
+        $Address = '*'
+    )
+    begin   {$text = ''}
+    process {$text += $Json}
+    end     {
+        #recursively expand the resoruces in each module.
+        function expandTfModule {
+            param (
+                [parameter(ValueFromPipeline=$true)]
+                $module ,
+                $tfVersion
+            )
+            begin {
+                $defaultPropertySet = ([System.Management.Automation.PSPropertySet]::new('DefaultDisplayPropertySet', [string[]]@('parent', 'provider_Name', 'type', 'name')))
+            }
+            process {
+                write-host "."
+                if ($module.address) {$path = $module.address} else {$path = "/" }# place holder - this probably isn't correct
+                if ($module.resources) {
+                    $module.resources |
+                        Add-Member -PassThru -MemberType MemberSet -Name PSStandardMembers -Value $defaultPropertySet|
+                        Add-Member -PassThru -NotePropertyName 'Parent'           -NotePropertyValue $path |
+                        Add-Member -PassThru -NotePropertyName 'TerraformVersion' -NotePropertyValue $tfVersion |
+                        Add-Member -PassThru -TypeName TerraformResource
+                }
+                if ( $module.child_modules) {$module.child_modules| expandTfModule -tfversion $tfVersion   }
+            }
+        }
+
+        $result = $text =  | ConvertFrom-Json
+        $result.values.root_module | expandTfModule -tfVersion $result.terraform_version | Where-Object -Property address -Like $Address
+    }
+}
