@@ -78,12 +78,18 @@
                     "Name": "Path",
                     "Position": 0,
                     "Description": "Path for the outputfile",
-                    "ParameterType": "String",
+                    "ParameterType": "sip tring",
+                    "OriginalPosition": -1
+                },
+                {
+                    "Name": "GraphVizPath",
+                    "Position": 1,
+                    "ParameterType": "string",
                     "OriginalPosition": -1
                 },
                 {
                     "Name": "ShowGraph",
-                    "Position": 1,
+                    "Position": 2,
                     "ParameterType": "switch",
                     "OriginalPosition": -1
                 }
@@ -93,7 +99,7 @@
                 "ParameterSetName": "Default",
                 "StreamOutput": true,
                 "HandlerType": "Function",
-                "Handler": "rendertfgraph -Path $Path -ShowGraph:$ShowGraph $input"
+                "Handler": "rendertfgraph -Path $Path -ShowGraph:$ShowGraph -GraphVizPath $GraphVizPath $input"
                 }
             ]
         },

@@ -9,16 +9,6 @@ class PowerShellCustomFunctionAttribute : System.Attribute {
     }
 }
 
-function tfVersionJsonToObject {
-  $tfver = $input | ConvertFrom-Json -AsHashtable
-  $providers =  $tfver.provider_selections.Keys | ForEach-Object { [pscustomObject]@{Provider=$_;Version=$tfver.provider_selections[$_]}}
-  [Pscustomobject][ordered]@{
-                    Platform  = $tfver.platform
-                    Version   = $tfver.terraform_version
-                    OutDated  = $tfver.terraform_outdated
-                    Providers = $Providers }    | Add-Member -TypeName TerraformVersion -PassThru
- }
-
 function NewArgument {
     param  ($value, $param)
     if ($value -is [switch]) {
@@ -36,6 +26,16 @@ function NewArgument {
         $value
     }
 }
+
+function tfVersionJsonToObject {
+  $tfver = $input | ConvertFrom-Json -AsHashtable
+  $providers =  $tfver.provider_selections.Keys | ForEach-Object { [pscustomObject]@{Provider=$_;Version=$tfver.provider_selections[$_]}}
+  [Pscustomobject][ordered]@{
+                    Platform  = $tfver.platform
+                    Version   = $tfver.terraform_version
+                    OutDated  = $tfver.terraform_outdated
+                    Providers = $Providers }    | Add-Member -TypeName TerraformVersion -PassThru
+ }
 
 function tfPlanJsonToObject {
     $result     = $input | convertfrom-json
@@ -58,6 +58,8 @@ function rendertfgraph {
         $Path,
         #GraphViz markup
         $GVCode,
+        #if it is not in a standard location
+        $GraphVizPath,
         #Open the result
         [switch]$ShowGraph
     )
@@ -72,7 +74,13 @@ function rendertfgraph {
         throw "To Convert to one of these formats you need to install the PSGraph module"
     }
     else {
-        $GVCode  | Export-PSGraph -DestinationPath $Path -OutputFormat $Matches[1] -ShowGraph:$ShowGraph
+        $exportParams = @{
+           DestinationPath = $Path
+           OutputFormat    =  $Matches[1]
+           ShowGraph       = $ShowGraph
+        }
+        if ($GraphVizPath) {$exportParams['GraphVizPath'] =$GraphVizPath}
+        $GVCode  | Export-PSGraph @exportParams
     }
  }
 
@@ -141,44 +149,42 @@ function Get-TerraformVersion {
   param   (  )
   begin   {
     if ( -not (Get-Command -ErrorAction Ignore terraform)) {throw  "Cannot find executable 'terraform'"}
-    $parameterMap   = @{   }
-    $outputHandlers = @{
+    $parameterMap         = @{   }
+    $outputHandlers       = @{
         Default = @{ StreamOutput = $True; Handler = 'tfVersionJsonToObject' }
     }
   }
   process {
-    if ($psboundParameters["Debug"]) { Wait-Debugger }
-
+    if ($PSBoundParameters["Debug"]) { Wait-Debugger }
     #region add those parameters which have default values, and absent switches, perform any value translations required
-    $boundParameters        =  $PSBoundParameters
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)} |
-                                 ForEach-Object { $boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
+    $boundParameters      =  $PSBoundParameters
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
+    $parameterMap.Keys.Where({$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
     #endregion
+    #region build the list of command line arguments
+    $commandArgs          = @()
 
-    #region build the list of command line argumnets
-    $commandArgs            = @()
-    # now the original command elements may be added
+    # add the original command elements
+    $commandArgs         += 'version'
+    $commandArgs         += '-json'
 
-    $commandArgs += 'version'
-    $commandArgs += '-json'
-
-    $commandArgs = $commandArgs | Where-Object {$_ -ne $null} # strip only nulls
+    # strip any nulls which may have crept in
+    $commandArgs          = $commandArgs | Where-Object {$null -ne $_}
     #endregion
-
     #region invoke the command with arguments and handle results
-    if ($boundParameters["Debug"])   {Wait-Debugger}
-
-    $handlerInfo = $outputHandlers[$PSCmdlet.ParameterSetName]
-    if (-not  $handlerInfo ) {$handlerInfo = $outputHandlers["Default"]} # Guaranteed to be present
-    $handler     = $handlerInfo.Handler
+    if ($outputHandlers[$PSCmdlet.ParameterSetName]) {
+          $handlerInfo    = $outputHandlers[$PSCmdlet.ParameterSetName]
+    }
+    else {$handlerInfo    = $outputHandlers["Default"] }# Guaranteed to be present
+    $handler              = $handlerInfo.Handler
     Write-Verbose -Message ("& ""terraform"" $commandArgs")
     if ( $handlerInfo.StreamOutput ) { & "terraform" $commandArgs | & $handler}
     else {
-        $result = & "terraform" $commandArgs
+        $result           = & "terraform" $commandArgs
         & $handler $result  # handler must be able to process an empty result
     }
     #endregion
@@ -204,7 +210,7 @@ function New-TerraformPlan {
   )
   begin   {
     if ( -not (Get-Command -ErrorAction Ignore terraform)) {throw  "Cannot find executable 'terraform'"}
-    $parameterMap   = @{
+    $parameterMap         = @{
         Directory = @{
             OriginalName        = '-chdir='
             OriginalPosition    = '0'
@@ -227,33 +233,34 @@ function New-TerraformPlan {
             NoGap               =  $False
         }
    }
-    $outputHandlers = @{
+    $outputHandlers       = @{
         Default = @{ StreamOutput = $True; Handler = 'tfPlanJsonToObject' }
     }
   }
   process {
-    if ($psboundParameters["Debug"]) { Wait-Debugger }
-
+    if ($PSBoundParameters["Debug"]) { Wait-Debugger }
     #region add those parameters which have default values, and absent switches, perform any value translations required
-    $boundParameters        =  $PSBoundParameters
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)} |
-                                 ForEach-Object { $boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
+    $boundParameters      =  $PSBoundParameters
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
+    $parameterMap.Keys.Where({$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
     #endregion
+    #region build the list of command line arguments
+    $commandArgs          = @()
 
-    #region build the list of command line argumnets
-    $commandArgs            = @()
-    # now the original command elements may be added
     # add any arguments which apply to the executable and must be before the original command elements, then the original elements if any then trailing arguments.
     $boundParameters.Keys | Where-Object {     $parameterMap[$_].ApplyToExecutable} |
         Sort-Object {$parameterMap[$_].OriginalPosition} | Foreach-Object { # take those parameters which apply to the executable
-        $commandArgs += NewArgument $boundParameters[$_]  $parameterMap[$_]  #only have parameters where $parameterMap[that name].Apply to executable is true, so this always returns a value
+        $commandArgs     += NewArgument $boundParameters[$_]  $parameterMap[$_]  #only have parameters where $parameterMap[that name].Apply to executable is true, so this always returns a value
     }
-    $commandArgs += 'plan'
-    $commandArgs += '-json'
+
+    # add the original command elements
+    $commandArgs         += 'plan'
+    $commandArgs         += '-json'
+
     # Add parameters which don't apply to the executable - use a negative original position to say this only in the wrapper, not passed to the command.
     $boundParameters.Keys | Where-Object {[int]$parameterMap[$_].OriginalPosition -ge 0 -and
                                           -not $parameterMap[$_].ApplyToExecutable} |
@@ -261,19 +268,19 @@ function New-TerraformPlan {
             $commandArgs += NewArgument $boundParameters[$_]  $parameterMap[$_]  #only have parameters where $parameterMap[that name].Original postion >=, so this always returns a value
     }
 
-    $commandArgs = $commandArgs | Where-Object {$_ -ne $null} # strip only nulls
+    # strip any nulls which may have crept in
+    $commandArgs          = $commandArgs | Where-Object {$null -ne $_}
     #endregion
-
     #region invoke the command with arguments and handle results
-    if ($boundParameters["Debug"])   {Wait-Debugger}
-
-    $handlerInfo = $outputHandlers[$PSCmdlet.ParameterSetName]
-    if (-not  $handlerInfo ) {$handlerInfo = $outputHandlers["Default"]} # Guaranteed to be present
-    $handler     = $handlerInfo.Handler
+    if ($outputHandlers[$PSCmdlet.ParameterSetName]) {
+          $handlerInfo    = $outputHandlers[$PSCmdlet.ParameterSetName]
+    }
+    else {$handlerInfo    = $outputHandlers["Default"] }# Guaranteed to be present
+    $handler              = $handlerInfo.Handler
     Write-Verbose -Message ("& ""terraform"" $commandArgs")
     if ( $handlerInfo.StreamOutput ) { & "terraform" $commandArgs | & $handler}
     else {
-        $result = & "terraform" $commandArgs
+        $result           = & "terraform" $commandArgs
         & $handler $result  # handler must be able to process an empty result
     }
     #endregion
@@ -295,17 +302,26 @@ function New-TerraformGraph {
 
   param   (
     [Parameter(Position=0)]
-    [String]$Path,
+    [string]$Path,
     [Parameter(Position=1)]
+    [string]$GraphVizPath,
+    [Parameter(Position=2)]
     [switch]$ShowGraph
   )
   begin   {
     if ( -not (Get-Command -ErrorAction Ignore terraform)) {throw  "Cannot find executable 'terraform'"}
-    $parameterMap   = @{
+    $parameterMap         = @{
         Path = @{
             OriginalName        = ''
             OriginalPosition    = '-1'
-            ParameterType       = 'String'
+            ParameterType       = 'string'
+            ApplyToExecutable   =  $False
+            NoGap               =  $False
+        }
+        GraphVizPath = @{
+            OriginalName        = ''
+            OriginalPosition    = '-1'
+            ParameterType       = 'string'
             ApplyToExecutable   =  $False
             NoGap               =  $False
         }
@@ -317,42 +333,40 @@ function New-TerraformGraph {
             NoGap               =  $False
         }
    }
-    $outputHandlers = @{
-        Default = @{ StreamOutput = $True; Handler = { rendertfgraph -Path $Path -ShowGraph:$ShowGraph $input } }
+    $outputHandlers       = @{
+        Default = @{ StreamOutput = $True; Handler = { rendertfgraph -Path $Path -ShowGraph:$ShowGraph -GraphVizPath $GraphVizPath $input } }
     }
   }
   process {
-    if ($psboundParameters["Debug"]) { Wait-Debugger }
-
+    if ($PSBoundParameters["Debug"]) { Wait-Debugger }
     #region add those parameters which have default values, and absent switches, perform any value translations required
-    $boundParameters        =  $PSBoundParameters
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)} |
-                                 ForEach-Object { $boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
+    $boundParameters      =  $PSBoundParameters
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
+    $parameterMap.Keys.Where({$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
     #endregion
+    #region build the list of command line arguments
+    $commandArgs          = @()
 
-    #region build the list of command line argumnets
-    $commandArgs            = @()
-    # now the original command elements may be added
+    # add the original command elements
+    $commandArgs         += 'graph'
 
-    $commandArgs += 'graph'
-
-    $commandArgs = $commandArgs | Where-Object {$_ -ne $null} # strip only nulls
+    # strip any nulls which may have crept in
+    $commandArgs          = $commandArgs | Where-Object {$null -ne $_}
     #endregion
-
     #region invoke the command with arguments and handle results
-    if ($boundParameters["Debug"])   {Wait-Debugger}
-
-    $handlerInfo = $outputHandlers[$PSCmdlet.ParameterSetName]
-    if (-not  $handlerInfo ) {$handlerInfo = $outputHandlers["Default"]} # Guaranteed to be present
-    $handler     = $handlerInfo.Handler
+    if ($outputHandlers[$PSCmdlet.ParameterSetName]) {
+          $handlerInfo    = $outputHandlers[$PSCmdlet.ParameterSetName]
+    }
+    else {$handlerInfo    = $outputHandlers["Default"] }# Guaranteed to be present
+    $handler              = $handlerInfo.Handler
     Write-Verbose -Message ("& ""terraform"" $commandArgs")
     if ( $handlerInfo.StreamOutput ) { & "terraform" $commandArgs | & $handler}
     else {
-        $result = & "terraform" $commandArgs
+        $result           = & "terraform" $commandArgs
         & $handler $result  # handler must be able to process an empty result
     }
     #endregion
@@ -376,7 +390,7 @@ function Test-TerraformFormat {
   )
   begin   {
     if ( -not (Get-Command -ErrorAction Ignore terraform)) {throw  "Cannot find executable 'terraform'"}
-    $parameterMap   = @{
+    $parameterMap         = @{
         Recurse = @{
             OriginalName        = '-recursive'
             OriginalPosition    = '2'
@@ -385,29 +399,28 @@ function Test-TerraformFormat {
             NoGap               =  $False
         }
    }
-    $outputHandlers = @{
+    $outputHandlers       = @{
         Default = @{ StreamOutput = $False; Handler = 'tfFormatCheckOK' }
     }
   }
   process {
-    if ($psboundParameters["Debug"]) { Wait-Debugger }
-
+    if ($PSBoundParameters["Debug"]) { Wait-Debugger }
     #region add those parameters which have default values, and absent switches, perform any value translations required
-    $boundParameters        =  $PSBoundParameters
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)} |
-                                 ForEach-Object { $boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
+    $boundParameters      =  $PSBoundParameters
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
+    $parameterMap.Keys.Where({$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
     #endregion
+    #region build the list of command line arguments
+    $commandArgs          = @()
 
-    #region build the list of command line argumnets
-    $commandArgs            = @()
-    # now the original command elements may be added
+    # add the original command elements
+    $commandArgs         += 'fmt'
+    $commandArgs         += '-check'
 
-    $commandArgs += 'fmt'
-    $commandArgs += '-check'
     # Add parameters which don't apply to the executable - use a negative original position to say this only in the wrapper, not passed to the command.
     $boundParameters.Keys | Where-Object {[int]$parameterMap[$_].OriginalPosition -ge 0 -and
                                           -not $parameterMap[$_].ApplyToExecutable} |
@@ -415,19 +428,19 @@ function Test-TerraformFormat {
             $commandArgs += NewArgument $boundParameters[$_]  $parameterMap[$_]  #only have parameters where $parameterMap[that name].Original postion >=, so this always returns a value
     }
 
-    $commandArgs = $commandArgs | Where-Object {$_ -ne $null} # strip only nulls
+    # strip any nulls which may have crept in
+    $commandArgs          = $commandArgs | Where-Object {$null -ne $_}
     #endregion
-
     #region invoke the command with arguments and handle results
-    if ($boundParameters["Debug"])   {Wait-Debugger}
-
-    $handlerInfo = $outputHandlers[$PSCmdlet.ParameterSetName]
-    if (-not  $handlerInfo ) {$handlerInfo = $outputHandlers["Default"]} # Guaranteed to be present
-    $handler     = $handlerInfo.Handler
+    if ($outputHandlers[$PSCmdlet.ParameterSetName]) {
+          $handlerInfo    = $outputHandlers[$PSCmdlet.ParameterSetName]
+    }
+    else {$handlerInfo    = $outputHandlers["Default"] }# Guaranteed to be present
+    $handler              = $handlerInfo.Handler
     Write-Verbose -Message ("& ""terraform"" $commandArgs")
     if ( $handlerInfo.StreamOutput ) { & "terraform" $commandArgs | & $handler}
     else {
-        $result = & "terraform" $commandArgs
+        $result           = & "terraform" $commandArgs
         & $handler $result  # handler must be able to process an empty result
     }
     #endregion
@@ -452,7 +465,7 @@ function Format-TerraformConfiguration {
   )
   begin   {
     if ( -not (Get-Command -ErrorAction Ignore terraform)) {throw  "Cannot find executable 'terraform'"}
-    $parameterMap   = @{
+    $parameterMap         = @{
         Recurse = @{
             OriginalName        = '-recursive'
             OriginalPosition    = '2'
@@ -461,28 +474,27 @@ function Format-TerraformConfiguration {
             NoGap               =  $False
         }
    }
-    $outputHandlers = @{
+    $outputHandlers       = @{
         Default = @{ StreamOutput = $False; Handler = 'tfFormatResults' }
     }
   }
   process {
-    if ($psboundParameters["Debug"]) { Wait-Debugger }
-
+    if ($PSBoundParameters["Debug"]) { Wait-Debugger }
     #region add those parameters which have default values, and absent switches, perform any value translations required
-    $boundParameters        =  $PSBoundParameters
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)} |
-                                 ForEach-Object { $boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
+    $boundParameters      =  $PSBoundParameters
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
+    $parameterMap.Keys.Where({$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
     #endregion
+    #region build the list of command line arguments
+    $commandArgs          = @()
 
-    #region build the list of command line argumnets
-    $commandArgs            = @()
-    # now the original command elements may be added
+    # add the original command elements
+    $commandArgs         += 'fmt'
 
-    $commandArgs += 'fmt'
     # Add parameters which don't apply to the executable - use a negative original position to say this only in the wrapper, not passed to the command.
     $boundParameters.Keys | Where-Object {[int]$parameterMap[$_].OriginalPosition -ge 0 -and
                                           -not $parameterMap[$_].ApplyToExecutable} |
@@ -490,19 +502,19 @@ function Format-TerraformConfiguration {
             $commandArgs += NewArgument $boundParameters[$_]  $parameterMap[$_]  #only have parameters where $parameterMap[that name].Original postion >=, so this always returns a value
     }
 
-    $commandArgs = $commandArgs | Where-Object {$_ -ne $null} # strip only nulls
+    # strip any nulls which may have crept in
+    $commandArgs          = $commandArgs | Where-Object {$null -ne $_}
     #endregion
-
     #region invoke the command with arguments and handle results
-    if ($boundParameters["Debug"])   {Wait-Debugger}
-
-    $handlerInfo = $outputHandlers[$PSCmdlet.ParameterSetName]
-    if (-not  $handlerInfo ) {$handlerInfo = $outputHandlers["Default"]} # Guaranteed to be present
-    $handler     = $handlerInfo.Handler
+    if ($outputHandlers[$PSCmdlet.ParameterSetName]) {
+          $handlerInfo    = $outputHandlers[$PSCmdlet.ParameterSetName]
+    }
+    else {$handlerInfo    = $outputHandlers["Default"] }# Guaranteed to be present
+    $handler              = $handlerInfo.Handler
     Write-Verbose -Message ("& ""terraform"" $commandArgs")
     if ( $handlerInfo.StreamOutput ) { & "terraform" $commandArgs | & $handler}
     else {
-        $result = & "terraform" $commandArgs
+        $result           = & "terraform" $commandArgs
         & $handler $result  # handler must be able to process an empty result
     }
     #endregion
@@ -528,7 +540,7 @@ function Get-TerraformState {
   )
   begin   {
     if ( -not (Get-Command -ErrorAction Ignore terraform)) {throw  "Cannot find executable 'terraform'"}
-    $parameterMap   = @{
+    $parameterMap         = @{
         Address = @{
             OriginalName        = ''
             OriginalPosition    = '-1'
@@ -538,43 +550,41 @@ function Get-TerraformState {
             DefaultValue        = '*'
         }
    }
-    $outputHandlers = @{
+    $outputHandlers       = @{
         Default = @{ StreamOutput = $True; Handler = { tfStateJsonToObject -Address $Address $input } }
     }
   }
   process {
-    if ($psboundParameters["Debug"]) { Wait-Debugger }
-
+    if ($PSBoundParameters["Debug"]) { Wait-Debugger }
     #region add those parameters which have default values, and absent switches, perform any value translations required
-    $boundParameters        =  $PSBoundParameters
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)} |
-                                 ForEach-Object { $boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
+    $boundParameters      =  $PSBoundParameters
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
+    $parameterMap.Keys.Where({$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
     #endregion
+    #region build the list of command line arguments
+    $commandArgs          = @()
 
-    #region build the list of command line argumnets
-    $commandArgs            = @()
-    # now the original command elements may be added
+    # add the original command elements
+    $commandArgs         += 'show'
+    $commandArgs         += '-json'
 
-    $commandArgs += 'show'
-    $commandArgs += '-json'
-
-    $commandArgs = $commandArgs | Where-Object {$_ -ne $null} # strip only nulls
+    # strip any nulls which may have crept in
+    $commandArgs          = $commandArgs | Where-Object {$null -ne $_}
     #endregion
-
     #region invoke the command with arguments and handle results
-    if ($boundParameters["Debug"])   {Wait-Debugger}
-
-    $handlerInfo = $outputHandlers[$PSCmdlet.ParameterSetName]
-    if (-not  $handlerInfo ) {$handlerInfo = $outputHandlers["Default"]} # Guaranteed to be present
-    $handler     = $handlerInfo.Handler
+    if ($outputHandlers[$PSCmdlet.ParameterSetName]) {
+          $handlerInfo    = $outputHandlers[$PSCmdlet.ParameterSetName]
+    }
+    else {$handlerInfo    = $outputHandlers["Default"] }# Guaranteed to be present
+    $handler              = $handlerInfo.Handler
     Write-Verbose -Message ("& ""terraform"" $commandArgs")
     if ( $handlerInfo.StreamOutput ) { & "terraform" $commandArgs | & $handler}
     else {
-        $result = & "terraform" $commandArgs
+        $result           = & "terraform" $commandArgs
         & $handler $result  # handler must be able to process an empty result
     }
     #endregion

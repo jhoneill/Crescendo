@@ -16,28 +16,26 @@ function <#FUNCTIONNAME#> {
   param   (<#PARAMLIST#>  )
   begin   {<#PLATFORMCHECK#>
     if ( -not (Get-Command -ErrorAction Ignore <#ORIGINALNAME#>)) {throw  "Cannot find executable '<#ORIGINALNAME#>'"}
-    $parameterMap   = @{<#PARAMETERMAP#>   }
-    $outputHandlers = @{<#HANDLERMAP#>    }
+    $parameterMap         = @{<#PARAMETERMAP#>   }
+    $outputHandlers       = @{<#HANDLERMAP#>    }
   }
   process {
-    if ($psboundParameters["Debug"]) { Wait-Debugger }
-
+    if ($PSBoundParameters["Debug"]) { Wait-Debugger }
     #region add those parameters which have default values, and absent switches, perform any value translations required
-    $boundParameters        =  $PSBoundParameters
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)} |
-                                 ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
-    $parameterMap.Keys      |  Where-Object {$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)} |
-                                 ForEach-Object { $boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
+    $boundParameters      =  $PSBoundParameters
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('DefaultValue') -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = Get-Variable $_ -ValueOnly }
+    $parameterMap.Keys.Where({$parameterMap[$_].ParameterType -eq "switch"  -and -not $PSBoundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = [switch]::new($false) }
+    $parameterMap.Keys.Where({$parameterMap[$_].containskey('ValueMap')     -and $boundParameters.ContainsKey($_)}) |
+           ForEach-Object {$boundParameters[$_] = $parameterMap[$_].ValueMap[$boundParameters[$_]]}
     #endregion
-
-    #region build the list of command line argumnets
-    $commandArgs            = @()
+    #region build the list of command line arguments
+    $commandArgs          = @()
 <#BUILDARGS#>
-    $commandArgs = $commandArgs | Where-Object {$_ -ne $null} # strip only nulls
+    # strip any nulls which may have crept in
+    $commandArgs          = $commandArgs | Where-Object {$null -ne $_}
     #endregion
-
 <#COMMANDBLOCK#>
   }
 }
@@ -55,14 +53,17 @@ $parameterTemplate  = @'
 '@
 #Some arguments are fixed - early parameters (if any) go before them, late parameters (if any) go after.
 $EarlyParameters    = @'
+
     # add any arguments which apply to the executable and must be before the original command elements, then the original elements if any then trailing arguments.
     $boundParameters.Keys | Where-Object {     $parameterMap[$_].ApplyToExecutable} |
         Sort-Object {$parameterMap[$_].OriginalPosition} | Foreach-Object { # take those parameters which apply to the executable
-        $commandArgs += NewArgument $boundParameters[$_]  $parameterMap[$_]  #only have parameters where $parameterMap[that name].Apply to executable is true, so this always returns a value
+        $commandArgs     += NewArgument $boundParameters[$_]  $parameterMap[$_]  #only have parameters where $parameterMap[that name].Apply to executable is true, so this always returns a value
     }
+
 
 '@
 $LateParameters     = @'
+
     # Add parameters which don't apply to the executable - use a negative original position to say this only in the wrapper, not passed to the command.
     $boundParameters.Keys | Where-Object {[int]$parameterMap[$_].OriginalPosition -ge 0 -and
                                           -not $parameterMap[$_].ApplyToExecutable} |
@@ -74,18 +75,18 @@ $LateParameters     = @'
 #if NoInvocation is specified we skip the command block; otherwise it's a fixed part and a part to ask shouldProcess or a part which doesn't  ask.
 $cmdblockStart      = @'
     #region invoke the command with arguments and handle results
-    if ($boundParameters["Debug"])   {Wait-Debugger}
-
-    $handlerInfo = $outputHandlers[$PSCmdlet.ParameterSetName]
-    if (-not  $handlerInfo ) {$handlerInfo = $outputHandlers["Default"]} # Guaranteed to be present
-    $handler     = $handlerInfo.Handler
+    if ($outputHandlers[$PSCmdlet.ParameterSetName]) {
+          $handlerInfo    = $outputHandlers[$PSCmdlet.ParameterSetName]
+    }
+    else {$handlerInfo    = $outputHandlers["Default"] }# Guaranteed to be present
+    $handler              = $handlerInfo.Handler
 
 '@
 $cmdblockProcess    = @'
     if ( $PSCmdlet.ShouldProcess("<#PRERUNMESSAGE#>")) {
         if ( $handlerInfo.StreamOutput ) { & <#THECOMMAND#> | & $handler}
         else {
-            $result = & <#THECOMMAND#>
+            $result       = & <#THECOMMAND#>
             & $handler $result  # handler must be able to process an empty result
         }
     }
@@ -95,7 +96,7 @@ $cmdblockAlways     = @'
     Write-Verbose -Message ("& <#PRERUNMESSAGE#>")
     if ( $handlerInfo.StreamOutput ) { & <#THECOMMAND#> | & $handler}
     else {
-        $result = & <#THECOMMAND#>
+        $result           = & <#THECOMMAND#>
         & $handler $result  # handler must be able to process an empty result
     }
     #endregion
@@ -397,7 +398,7 @@ class Command              {
     }
 
     #return helper functions as a hashtable of Name=function so an export of mutliple commands can de-duplicate and write one set of helpers
-    [hashtable]GetHelperFunctions() {
+    [System.Collections.Specialized.OrderedDictionary]GetHelperFunctions() {
         $HelperTable = [ordered]@{} +$script:HelperFunctions
         foreach ($handler in $this.OutputHandlers.where({$_.HandlerType -eq 'Function'}) ) {
             $handlerName      = $handler.Handler -replace '^(\S+)\s.*$','$1'
@@ -511,10 +512,10 @@ class Command              {
         if ($this.parameters.where({$_.ApplyToExecutable}))   {$argBuilder  = $script:earlyParameters}
         else                                                  {$argBuilder  = "`n"}
         if ($this.OriginalCommandElements)                    {
-            $argBuilder      = "    # now the original command elements may be added`n" + $argBuilder
+            $argBuilder      =  $argBuilder + "    # add the original command elements`n"
             foreach($element in $this.OriginalCommandElements) {
                 # we put single quotes into the code to reduce injection attacks
-                $argBuilder  +=  "    `$commandArgs += '$element'`n"
+                $argBuilder  +=  "    `$commandArgs         += '$element'`n"
             }
         }
         if ($this.parameters.where({-not $_.ApplyToExecutable -and $_.originalposition -ge 0}) ) {
@@ -726,7 +727,7 @@ function Test-IsCrescendoCommand {
             elseif ($cmd -is [string]) {
                 $fInfo = Get-Command -Name $cmd -CommandType Function -ErrorAction Ignore
             }
-            if(-not $fInfo) {
+            if (-not $fInfo) {
                 Write-Error -Message "'$cmd' is not a function" -TargetObject "$cmd" -RecommendedAction "Be sure that the command is a function"
                 continue
             }
@@ -836,7 +837,6 @@ function Export-CrescendoModule {
         }
         else {  # Add the  static parts of the crescendo module
             Set-Content -Path $ModuleName -Value $script:ModuleStart -Confirm:$false
-            $moduleBase = [System.IO.Path]::GetDirectoryName($ModuleName)
         }
     }
     process {
@@ -851,6 +851,7 @@ function Export-CrescendoModule {
         }
     }
     end     {
+        #region prepare parameters to create the module manifest
         $psdPath                 = $ModuleName -Replace "psm1$","psd1"
         $ModuleManifestArguments = @{
                     Path              =  $psdPath
@@ -859,6 +860,7 @@ function Export-CrescendoModule {
                     Tags              = @()
                     PrivateData       = @{}
         }
+        #retain [most] settings from any existing PSD file
         if (Test-Path $psdPath)  {
             $existing = Import-PowerShellDataFile -Path $psdPath
             $existing.keys.where({$_ -in (Get-Command -Name New-ModuleManifest).Parameters.keys }).foreach({
@@ -872,24 +874,35 @@ function Export-CrescendoModule {
             }
         }
         #reset properties if they  were in an existing PSD1
-        $ModuleManifestArguments['AliasesToExport']                = @() + $crescendoCollection.Aliases
-        $ModuleManifestArguments['FunctionsToExport']              = @() + $crescendoCollection.FunctionName
         $ModuleManifestArguments['PowerShellVersion']              = "5.1.0"
         $ModuleManifestArguments['RootModule']                     = [System.io.path]::GetFileName(${ModuleName})
+        $ModuleManifestArguments['AliasesToExport']                = @()
+        $ModuleManifestArguments['FunctionsToExport']              = @()
+        $ModuleManifestArguments['FileList']                       = @()
+        #root module and PS Version may be overridden and private-data and/or extra tags, files, functions and/or aliases can be passed via the cmdline.
+        $PSBoundParameters.keys.where({$_ -notmatch 'Verbose|Debug|PassThru|Action$|Variable$|OutBuffer|Confirm|Whatif|Commands|ConfigurationFile|ModuleName|Force'}).foreach({
+            $ModuleManifestArguments[$_] = $PSBoundParameters[$_]
+        })
+        #Always add aliases, functions, known files & Crescendo information
+        $ModuleManifestArguments['AliasesToExport']                = @() + $ModuleManifestArguments['AliasesToExport']   + $crescendoCollection.Aliases
+        $ModuleManifestArguments['FunctionsToExport']              = @() + $ModuleManifestArguments['FunctionsToExport'] + $crescendoCollection.FunctionName
+        $ModuleManifestArguments['FileList']                       = @() + $ModuleManifestArguments['FileList']   + @($ModuleName,$psdPath)
+        foreach ($handler in $crescendoCollection.OutputHandlers.where({$_.HandlerType -eq "Script"})) {
+                                                                           $ModuleManifestArguments['FileList']   +=  ($handler.Handler -replace '^(\S+)\s.*$','$1')
+        }
+        if ($PSBoundParameters.ContainsKey('FormatsToProcess'))    {       $ModuleManifestArguments['FileList']   +=  $PSBoundParameters['FormatsToProcess']}
+        if ($PSBoundParameters.ContainsKey('TypesToProcess'))      {       $ModuleManifestArguments['FileList']   +=  $PSBoundParameters['TypesToProcess']}
+        if ($PSBoundParameters.ContainsKey('ScriptsToProcess'))    {       $ModuleManifestArguments['FileList']   +=  $PSBoundParameters['ScriptsToProcess']}
         $ModuleManifestArguments.PrivateData['CrescendoVersion']   = (Get-Module Microsoft.PowerShell.Crescendo).Version
         $ModuleManifestArguments.PrivateData['CrescendoGenerated'] =  Get-Date -Format 'o' # unambiguous format
         if ($ModuleManifestArguments.Tags -notcontains 'CrescendoBuilt' ) {
             $ModuleManifestArguments.Tags     +=     @('CrescendoBuilt')
         }
-
-        #Extra functions and/or aliases can be passed via the cmdline.
-        $psboundParameters.keys.where({$_ -notmatch 'Verbose|Debug|PassThru|Action$|Variable$|OutBuffer|Confirm|Whatif|Commands|ConfigurationFile|ModuleName|Force'}).foreach({
-            $ModuleManifestArguments[$_] = $PSBoundParameters[$_]
-        })
-        if ($psboundParameters['WhatIf']) {
-            $ModuleManifestArguments | Out-String |  Write-Verbose -Verbose
-        }
+        if ($PSBoundParameters['WhatIf']) { $ModuleManifestArguments | Out-String |  Write-Verbose -Verbose  }
+        #endregion
+        #Don't write is set to true if should process in the begin block said "NO" we still want to check what would be built.
         if ($DontWrite) {return}
+        #region output the helper functions for output handlers etc and command wrapper functions to the psm1 file
         # insert the windows elevation helper if it is called
         if ($crescendoCollection.Elevation.Command -eq "Invoke-WindowsNativeAppWithElevation") {
             "function Invoke-WindowsNativeAppWithElevation {`n"  +
@@ -899,18 +912,19 @@ function Export-CrescendoModule {
         $helpers = [ordered]@{}
         foreach ($proxy in $crescendoCollection) {
             $proxyHelpers = $proxy.GetHelperFunctions()
-            foreach ($k in $proxyHelpers.keys) {$helpers[$k] = $proxyHelpers[$k]}
+            foreach ($k in $proxyHelpers.keys.where({-not $helpers[$_]})) {$helpers[$k] = $proxyHelpers[$k]}
         }
         #Output the helper functions first, then the functions we build with the Crescendo attribute and skipping their helpers
         foreach ($k in $helpers.keys) {$helpers[$k] + "`n" >> $ModuleName}
         foreach ($proxy in $crescendoCollection) {$proxy.ToString($true,$true) >> $ModuleName}
         #todo build filelist.
-        New-ModuleManifest @ModuleManifestArguments
-        if ($PassThru) {Get-item $ModuleManifestArguments.Path}
-        # copy the script output handlers into place
+        #endregion
+        #region copy any script output handlers into the module directory
+        $ModuleDirectory =  Resolve-Path $ModuleName | Split-Path
         foreach($handler in $crescendoCollection.OutputHandlers.where({$_.HandlerType -eq "Script"})) {
-            $scriptInfo = Get-Command -ErrorAction Ignore -CommandType ExternalScript $handler.Handler
-            if($scriptInfo) { Copy-Item $scriptInfo.Source $moduleBase }
+            $scriptInfo = Get-Command -ErrorAction Ignore -CommandType ExternalScript ($handler.Handler -replace '^(\S+)\s.*$','$1')
+            if     ($scriptInfo.Source -like "$ModuleDirectory*") {    Write-Vebose "$($handler.Handler -replace '^(\S+)\s.*$','$1')) is already in $ModuleDirectory." }
+            elseif ($scriptInfo) { Copy-Item $scriptInfo.Source $ModuleDirectory }
             else {
                 $errArgs = @{
                     Category          = "ObjectNotFound"
@@ -921,5 +935,9 @@ function Export-CrescendoModule {
                 Write-Error @errArgs
             }
         }
+        #endregion
+        #And create the manifest.
+        New-ModuleManifest @ModuleManifestArguments
+        if ($PassThru) {Get-item $ModuleManifestArguments.Path}
     }
 }

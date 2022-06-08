@@ -29,6 +29,8 @@ function tfVersionJsonToObject {
         $Path,
         #GraphViz markup
         $GVCode,
+        #if it is not in a standard location
+        $GraphVizPath,
         #Open the result
         [switch]$ShowGraph
     )
@@ -43,7 +45,13 @@ function tfVersionJsonToObject {
         throw "To Convert to one of these formats you need to install the PSGraph module"
     }
     else {
-        $GVCode  | Export-PSGraph -DestinationPath $Path -OutputFormat $Matches[1] -ShowGraph:$ShowGraph
+        $exportParams = @{
+           DestinationPath = $Path
+           OutputFormat    =  $Matches[1]
+           ShowGraph       = $ShowGraph
+        }
+        if ($GraphVizPath) {$exportParams['GraphVizPath'] =$GraphVizPath}
+        $GVCode  | Export-PSGraph @exportParams
     }
  }
 
@@ -93,7 +101,7 @@ function tfStateJsonToObject {
             }
         }
 
-        $result = $text =  | ConvertFrom-Json
+        $result = $text | ConvertFrom-Json
         $result.values.root_module | expandTfModule -tfVersion $result.terraform_version | Where-Object -Property address -Like $Address
     }
 }
