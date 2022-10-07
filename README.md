@@ -26,7 +26,6 @@ So what is my fork which isn't in the original?
   - Moved the location of the test for presence of the command-to-be-launched to an earlier point.
   - Code to add arguments from parameters before and after fixed arguments has been cleaned up. Common parts have been moved to a helper function, and code is omitted when the definition has no "before" and/or no "after" items .
 - Command launching
-  - Fixed an error for non streamed output when the command returns nothing and runs `handler $result` with a null result
   - Modified process for functions so a handler can be `| function -param1 -param2 value` 
   - `if ($psCmdlet.shouldProcess ...` is now only included if if ShouldProcess is if specified for the command
   - `if ($verbose) {write-verbose-verbose  <whatever the command is> }` has been replaced with Write-Verbose when ShouldProcess is NOT present.
